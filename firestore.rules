@@ -1,0 +1,275 @@
+rules_version = '2';
+
+// Siyaq security rules. Deny by default; every collection below lists exactly
+// who may read it and which fields each role may write.
+//
+// Roles live on users/{uid}.role: student | parent | tutor | admin.
+// Admins are created by hand in the console (the app can't create them).
+// Tutors only count once users/{uid}.approved == true.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ───────────── helpers ─────────────
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // The caller's own profile document (an error here denies the rule).
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function role() {
+      return signedIn() ? profile().role : '';
+    }
+
+    function isAdmin() {
+      return role() == 'admin';
+    }
+
+    function isApprovedTutor() {
+      return role() == 'tutor' && profile().approved == true;
+    }
+
+    // Caller is a parent who has linked this student.
+    function isParentOf(studentId) {
+      return role() == 'parent' && studentId in profile().childIds;
+    }
+
+    // ───────────── users ─────────────
+
+    match /users/{uid} {
+      function isSelf() {
+        return signedIn() && request.auth.uid == uid;
+      }
+
+      function validName(n) {
+        return n is string && n.size() > 0 && n.size() <= 100;
+      }
+
+      // Fields a new profile may contain, per role. Nobody can create an admin,
+      // and tutors always start unapproved.
+      function validNewProfile(d) {
+        return d.keys().hasOnly(['name', 'email', 'role', 'childIds', 'approved'])
+          && d.keys().hasAll(['name', 'email', 'role'])
+          && validName(d.name)
+          && d.email is string && d.email.size() <= 254
+          && d.role in ['student', 'parent', 'tutor']
+          && (d.role == 'tutor'
+                ? (d.get('approved', null) == false && !('childIds' in d.keys()))
+                : !('approved' in d.keys()))
+          && (d.role == 'parent'
+                ? d.get('childIds', null) == []
+                : !('childIds' in d.keys()));
+      }
+
+      // A parent may add at most one student per write, and only a real
+      // student account (they must know its uid, which acts as the link code).
+      function childAddOk() {
+        let added = request.resource.data.childIds
+            .removeAll(resource.data.get('childIds', []));
+        return added.size() == 0
+          || (added.size() == 1
+              && get(/databases/$(database)/documents/users/$(added[0])).data.role == 'student');
+      }
+
+      function selfUpdateOk() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return changed.hasOnly(['name', 'childIds'])
+          && validName(request.resource.data.name)
+          && (!changed.hasAny(['childIds'])
+              || (resource.data.role == 'parent'
+                  && request.resource.data.childIds is list
+                  && request.resource.data.childIds.size() <= 30
+                  && childAddOk()));
+      }
+
+      // Admins may only flip a tutor's approval.
+      function adminUpdateOk() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return changed.hasOnly(['approved'])
+          && resource.data.role == 'tutor'
+          && request.resource.data.approved is bool;
+      }
+
+      // Single-document reads only (no listing), so a profile can't be
+      // enumerated: you need its uid. Approved tutors and parents may read
+      // student profiles; the uids reach them through their sessions / link code.
+      allow get: if isSelf()
+        || isAdmin()
+        || ((isApprovedTutor() || role() == 'parent') && resource.data.role == 'student');
+      allow list: if isAdmin();
+
+      allow create: if isSelf() && validNewProfile(request.resource.data);
+      allow update: if (isSelf() && selfUpdateOk()) || (isAdmin() && adminUpdateOk());
+      allow delete: if false;
+    }
+
+    // ───────────── sessions ─────────────
+
+    match /sessions/{sessionId} {
+      function linkOk(l) {
+        return l == null || (l is string && l.size() <= 300 && l.matches('^https://.+'));
+      }
+
+      function validNewSession(d) {
+        return d.keys().hasOnly(['studentId', 'tutorId', 'subject', 'scheduledAt',
+                                 'isTrial', 'status', 'googleMeetLink'])
+          && d.keys().hasAll(['studentId', 'tutorId', 'subject', 'scheduledAt', 'isTrial', 'status'])
+          && ((role() == 'student' && d.studentId == request.auth.uid)
+              || isParentOf(d.studentId))
+          && d.tutorId == 'TBD'
+          && d.status == 'pending'
+          && d.subject is string && d.subject.size() <= 100
+          && d.scheduledAt is string && d.scheduledAt.size() <= 40
+          && d.isTrial is bool
+          && d.get('googleMeetLink', null) == null;
+      }
+
+      // A tutor claims an unassigned, pending booking.
+      function tutorAccepts() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        let d = request.resource.data;
+        return isApprovedTutor()
+          && resource.data.tutorId == 'TBD'
+          && resource.data.status == 'pending'
+          && changed.hasOnly(['tutorId', 'status', 'googleMeetLink'])
+          && d.tutorId == request.auth.uid
+          && d.status == 'confirmed'
+          && linkOk(d.get('googleMeetLink', null));
+      }
+
+      // A tutor manages their own session: allowed status transitions and the
+      // Meet link, nothing else.
+      function tutorManages() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        let d = request.resource.data;
+        return isApprovedTutor()
+          && resource.data.tutorId == request.auth.uid
+          && changed.hasOnly(['status', 'googleMeetLink'])
+          && (!changed.hasAny(['status'])
+              || (resource.data.status == 'pending' && d.status in ['confirmed', 'cancelled'])
+              || (resource.data.status == 'confirmed' && d.status in ['completed', 'cancelled']))
+          && (!changed.hasAny(['googleMeetLink'])
+              || (resource.data.status in ['pending', 'confirmed']
+                  && linkOk(d.get('googleMeetLink', null))));
+      }
+
+      // An admin assigns an approved tutor to an unclaimed booking.
+      function adminAssigns() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        let d = request.resource.data;
+        return isAdmin()
+          && resource.data.tutorId == 'TBD'
+          && resource.data.status == 'pending'
+          && changed.hasOnly(['tutorId', 'status'])
+          && d.status == 'confirmed'
+          && get(/databases/$(database)/documents/users/$(d.tutorId)).data.role == 'tutor'
+          && get(/databases/$(database)/documents/users/$(d.tutorId)).data.approved == true;
+      }
+
+      allow get, list: if isAdmin()
+        || (signedIn() && resource.data.studentId == request.auth.uid)
+        || (isApprovedTutor()
+            && (resource.data.tutorId == request.auth.uid || resource.data.tutorId == 'TBD'))
+        || isParentOf(resource.data.studentId);
+
+      allow create: if signedIn() && validNewSession(request.resource.data);
+      allow update: if tutorAccepts() || tutorManages() || adminAssigns();
+      allow delete: if false;
+    }
+
+    // ───────────── tutor_applications ─────────────
+    // One application per tutor, keyed by their uid. A tutor submits it, an
+    // admin approves or rejects it, and a rejected tutor may edit and resubmit.
+    // (Approving also flips users/{uid}.approved; the app does both in one batch.)
+
+    match /tutor_applications/{tutorId} {
+      function isOwner() {
+        return signedIn() && request.auth.uid == tutorId;
+      }
+
+      // The subject names must match lib/data/curriculum.dart (allSubjects()).
+      function validContent(d) {
+        return d.phone is string && d.phone.matches('^[+]?[0-9 ]{8,20}$')
+          && d.qualification is string && d.qualification.size() >= 2 && d.qualification.size() <= 200
+          && d.experienceYears is int && d.experienceYears >= 0 && d.experienceYears <= 50
+          && d.subjects is list && d.subjects.size() >= 1 && d.subjects.size() <= 10
+          && d.subjects.toSet().hasOnly(['القرآن الكريم', 'التجويد وأحكام التلاوة', 'اللغة العربية',
+                                         'الرياضيات', 'اللغة الإنجليزية', 'العلوم'])
+          && d.stages is list && d.stages.size() >= 1 && d.stages.size() <= 3
+          && d.stages.toSet().hasOnly(['primary', 'prep', 'secondary'])
+          && d.bio is string && d.bio.size() >= 20 && d.bio.size() <= 1000
+          && d.availability is string && d.availability.size() >= 1 && d.availability.size() <= 300;
+      }
+
+      // The exact shape of a fresh or resubmitted application: no review fields.
+      function validSubmission(d) {
+        return d.keys().hasOnly(['phone', 'qualification', 'experienceYears', 'subjects',
+                                 'stages', 'bio', 'availability', 'status', 'submittedAt'])
+          && d.keys().hasAll(['phone', 'qualification', 'experienceYears', 'subjects',
+                              'stages', 'bio', 'availability', 'status', 'submittedAt'])
+          && d.status == 'submitted'
+          && d.submittedAt is string && d.submittedAt.size() <= 40
+          && validContent(d);
+      }
+
+      function adminDecides() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        let d = request.resource.data;
+        return isAdmin()
+          && resource.data.status == 'submitted'
+          && changed.hasOnly(['status', 'reviewNote', 'reviewedAt'])
+          && d.status in ['approved', 'rejected']
+          && (d.status == 'approved'
+              || (d.get('reviewNote', null) is string
+                  && d.reviewNote.size() >= 3 && d.reviewNote.size() <= 500))
+          && d.reviewedAt is string && d.reviewedAt.size() <= 40;
+      }
+
+      allow get: if isOwner() || isAdmin();
+      allow list: if isAdmin();
+
+      allow create: if isOwner()
+        && role() == 'tutor'
+        && profile().get('approved', false) != true
+        && validSubmission(request.resource.data);
+
+      // Resubmit after a rejection: the document is rewritten without the
+      // review fields.
+      allow update: if (isOwner()
+          && role() == 'tutor'
+          && resource.data.status == 'rejected'
+          && validSubmission(request.resource.data))
+        || adminDecides();
+
+      allow delete: if false;
+    }
+
+    // ───────────── progress_reports ─────────────
+
+    match /progress_reports/{reportId} {
+      function validNewReport(d) {
+        return d.keys().hasOnly(['studentId', 'tutorId', 'subject', 'score', 'tutorNotes', 'date'])
+          && d.keys().hasAll(['studentId', 'tutorId', 'subject', 'score', 'tutorNotes', 'date'])
+          && d.tutorId == request.auth.uid
+          && d.studentId is string && d.studentId.size() > 0
+          && d.subject is string && d.subject.size() > 0 && d.subject.size() <= 100
+          && d.score is number && d.score >= 0 && d.score <= 100
+          && d.tutorNotes is string && d.tutorNotes.size() <= 2000
+          && d.date is string && d.date.size() <= 40;
+      }
+
+      allow get, list: if isAdmin()
+        || (signedIn() && resource.data.studentId == request.auth.uid)
+        || (isApprovedTutor() && resource.data.tutorId == request.auth.uid)
+        || isParentOf(resource.data.studentId);
+
+      // Reports are write-once.
+      allow create: if isApprovedTutor() && validNewReport(request.resource.data);
+      allow update, delete: if false;
+    }
+  }
+}

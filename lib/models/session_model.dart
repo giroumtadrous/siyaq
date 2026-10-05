@@ -1,5 +1,8 @@
 enum SessionStatus { pending, confirmed, completed, cancelled }
 
+/// `tutorId` of a booking that no tutor has accepted yet.
+const unassignedTutorId = 'TBD';
+
 class TutoringSession {
   final String id;
   final String studentId;

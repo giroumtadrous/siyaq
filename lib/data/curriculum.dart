@@ -18,7 +18,10 @@ class Grade {
 }
 
 class Stage {
-  const Stage(this.name, this.icon, this.grades);
+  const Stage(this.id, this.name, this.icon, this.grades);
+
+  /// Stable key stored in Firestore (primary | prep | secondary).
+  final String id;
   final String name;
   final IconData icon;
   final List<Grade> grades;
@@ -40,7 +43,7 @@ const _science = Subject('العلوم',
 const _core = [_quran, _tajweed, _arabic, _math, _english];
 
 const stages = [
-  Stage('المرحلة الابتدائية', Icons.child_care_rounded, [
+  Stage('primary', 'المرحلة الابتدائية', Icons.child_care_rounded, [
     Grade('الصف الأول الابتدائي', 'تأسيس القراءة والكتابة والحساب',
         [_quran, _tajweed, _arabic, _math]),
     Grade('الصف الثاني الابتدائي', 'تثبيت المهارات الأساسية وبناء الثقة',
@@ -54,14 +57,14 @@ const stages = [
     Grade('الصف السادس الابتدائي', 'مراجعة شاملة ونماذج امتحانات',
         [_quran, _arabic, _math, _english, _science]),
   ]),
-  Stage('المرحلة الإعدادية', Icons.auto_stories_rounded, [
+  Stage('prep', 'المرحلة الإعدادية', Icons.auto_stories_rounded, [
     Grade('الصف الأول الإعدادي', 'تأسيس النحو والتحليل ومبادئ الجبر والهندسة', _core),
     Grade('الصف الثاني الإعدادي',
         'تطوير التحصيل وحل التدريبات ونماذج الامتحانات المعمقة', _core),
     Grade('الصف الثالث الإعدادي (الشهادة)',
         'استعداد مكثف للشهادة الإعدادية وتدريب على نماذج الامتحانات', _core),
   ]),
-  Stage('المرحلة الثانوية', Icons.school_rounded, [
+  Stage('secondary', 'المرحلة الثانوية', Icons.school_rounded, [
     Grade('الصف الأول الثانوي', 'بناء قاعدة قوية للثانوية العامة',
         [_arabic, _math, _english, _science]),
     Grade('الصف الثاني الثانوي', 'التعمق في المقررات وحل المسائل',
@@ -70,3 +73,15 @@ const stages = [
         [_arabic, _math, _english, _science]),
   ]),
 ];
+
+/// Every distinct subject across all stages. The names are also listed in
+/// firestore.rules (tutor applications), so keep both in sync.
+List<Subject> allSubjects() {
+  final seen = <String>{};
+  return [
+    for (final stage in stages)
+      for (final grade in stage.grades)
+        for (final s in grade.subjects)
+          if (seen.add(s.name)) s,
+  ];
+}

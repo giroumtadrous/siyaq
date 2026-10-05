@@ -3,7 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/curriculum.dart';
 import '../../theme/app_theme.dart';
-import '../auth/login_screen.dart';
+import '../auth/auth_screen.dart';
 
 bool _isWide(BuildContext c) => MediaQuery.sizeOf(c).width >= 900;
 
@@ -187,7 +187,7 @@ class _Hero extends StatelessWidget {
             const SizedBox(width: 8),
             OutlinedButton(
               onPressed: () => Navigator.of(context)
-                  .push(MaterialPageRoute(builder: (_) => const LoginScreen())),
+                  .push(MaterialPageRoute(builder: (_) => const AuthScreen())),
               style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: AppColors.border),
                   shape: RoundedRectangleBorder(

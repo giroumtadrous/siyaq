@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "staging": "siyaq-dc1a6",
+    "default": "siyaq-dc1a6"
+  },
+  "targets": {},
+  "etags": {}
+}
