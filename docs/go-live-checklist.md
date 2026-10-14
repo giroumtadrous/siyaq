@@ -8,6 +8,42 @@ Firebase project: `siyaq-dc1a6`. Web launch first; the phone apps are in section
 
 ---
 
+## What's left (checked against the code on 2026-10-14)
+
+Done since the first draft: `.firebaserc` links the folder to `siyaq-dc1a6`; `firebase.json` hosts `build/web` with the rewrite rule; the app uses `go_router` with real URLs; "انضمام كمعلم" opens sign-up as a tutor; a hosting deploy of `build/web` was run once on 2026-10-05 (`.firebase/` cache).
+
+**Blocking launch — code and repo**
+- [ ] **Commit the router work.** `lib/router/`, `test/navigation_test.dart` and edits to 9 files are uncommitted. Run `flutter analyze` and `flutter test` first (section 6).
+- [ ] **Fix the GitHub deploy workflows.** Both files in `.github/workflows/` run `npm ci && npm run build`, but there is no `package.json`, so every push to `master` and every PR fails. Replace that step with a Flutter setup (`subosito/flutter-action`) plus `flutter pub get` and `flutter build web --release`, or delete the workflows and deploy by hand. Also check the `FIREBASE_SERVICE_ACCOUNT_SIYAQ_DC1A6` secret exists in the repo settings.
+- [ ] **Delete the stray `public/` and `y/` folders.** Both hold the Firebase "Welcome to Firebase Hosting" placeholder page and are no longer used.
+- [ ] **WhatsApp number** is still the placeholder `201000000000` (`lib/data/curriculum.dart:4`).
+- [ ] **Terms and privacy links** in the landing footer (`landing_screen.dart:752-753`) still go nowhere. They need real pages (section 9).
+- [ ] **Copyright** still says ٢٠٢٥ (`landing_screen.dart:756`).
+- [ ] **"4.9/5" and "100%" claims** (`landing_screen.dart:166-167`): keep only if true.
+- [ ] **Web metadata** is all Flutter defaults: title `siyaq`, description "A new Flutter project.", no `lang="ar" dir="rtl"`, blue `#0175C2` manifest colours, Flutter icons (section 5).
+- [ ] **Unused packages:** `googleapis`, `googleapis_auth` and `table_calendar` are still in `pubspec.yaml` (`go_router` is now used, so keep it).
+- [ ] **Dead screens:** `PortfolioScreen` and `ProgressReportScreen` are TODO stubs that nothing opens. Delete them or leave them unrouted; don't link to them for v1.
+
+**Blocking launch — Firebase console** (can't be confirmed from the code; tick once you've checked)
+- [ ] CLI signed in as the launch account (section 1).
+- [ ] Firestore created in production mode, Email/Password enabled, launch domain authorized (section 2).
+- [ ] Rules and indexes deployed and the 67 rules tests pass first (section 3).
+- [ ] First admin created (section 4).
+- [ ] API key restricted to your domain (section 2).
+- [ ] The live site is a fresh release build of the committed code, not the 2026-10-05 upload (section 7).
+- [ ] Full smoke test on the live site, then test data cleaned up (section 8).
+
+**Blocking launch — legal**
+- [ ] Privacy policy and terms pages written and linked (section 9).
+- [ ] A written process for account deletion requests and for vetting tutors (section 9).
+- [ ] Backups or a scheduled manual export (section 9).
+
+**Decisions still open** — section 0 (web-only vs. apps, which gaps to accept), and whether to require email verification (the app doesn't check it).
+
+**Only if shipping phone apps** — Android release still signs with the debug key (`android/app/build.gradle.kts:40`); see section 10.
+
+---
+
 ## 0. Decide first
 
 Settle these before spending time on the rest, because they change what you build.
@@ -37,7 +73,7 @@ Settle these before spending time on the rest, because they change what you buil
   ```
 
   Done when `siyaq-dc1a6` appears in the project list.
-- [ ] Link the folder to the project. This creates `.firebaserc`, which doesn't exist yet.
+- [x] Link the folder to the project. `.firebaserc` now exists.
 
   ```bash
   firebase use siyaq-dc1a6
@@ -111,7 +147,7 @@ Any tutors who registered before the application feature have no application. Th
 These are in the code today and would embarrass you on launch day.
 
 - [ ] **WhatsApp number.** `whatsappNumber` in `lib/data/curriculum.dart` is a placeholder (`201000000000`). Every "book via WhatsApp" and "support" button uses it. Use the international format with no `+`.
-- [ ] **Landing page links that go nowhere:** "انضمام كمعلم" (join as a tutor), "الشروط والضمان" (terms), "سياسة الخصوصية" (privacy). "Join as a tutor" should open sign-up with the tutor role selected.
+- [ ] **Landing page links that go nowhere:** "انضمام كمعلم" (join as a tutor), "الشروط والضمان" (terms), "سياسة الخصوصية" (privacy). "Join as a tutor" is now done (opens sign-up with the tutor role).
 - [ ] **Copyright line** still says ٢٠٢٥.
 - [ ] **Claims you show:** "4.9/5 parent rating" and "100% vetted tutors". Keep them only if they're true for your platform.
 - [ ] **Subjects and grades.** The curriculum list was partly written from one page of the reference site. Check it matches what you actually teach.
@@ -141,10 +177,10 @@ All must pass on the exact code you're releasing.
   flutter test
   ```
 - [ ] Rules tests pass (section 3).
-- [ ] **Unused packages.** `googleapis`, `googleapis_auth`, `table_calendar`, `go_router` and `firebase_storage` aren't used by any screen. Remove the ones you won't use soon to keep the web build lean. Keep `firebase_storage` if you plan certificate uploads.
+- [ ] **Unused packages.** `googleapis`, `googleapis_auth`, `table_calendar` and `firebase_storage` aren't used by any screen (`go_router` now is). Remove the ones you won't use soon to keep the web build lean. Keep `firebase_storage` if you plan certificate uploads.
 
   ```bash
-  flutter pub remove googleapis googleapis_auth table_calendar go_router
+  flutter pub remove googleapis googleapis_auth table_calendar
   ```
 - [ ] The project is under version control and the commit you release is tagged. A `.git` folder exists; commit your work.
 - [ ] `lib/firebase_options.dart` points at `siyaq-dc1a6` (it does today).
@@ -176,7 +212,8 @@ All must pass on the exact code you're releasing.
     ```bash
     firebase deploy --only hosting --project siyaq-dc1a6
     ```
-- [ ] The app navigates without changing the address, so there are no deep links to break and no special rewrite rules are needed. A refresh returns to the landing page or your dashboard.
+- [ ] **Rewrite rule for page addresses.** The app has real URLs (`/login`, `/signup`, `/book`), so the host must serve `index.html` for every path, or refreshing `/login` shows a 404. Firebase Hosting already has this in `firebase.json` (`"rewrites": [{"source": "**", "destination": "/index.html"}]`). On Vercel, add a `vercel.json` with `{"rewrites": [{"source": "/(.*)", "destination": "/index.html"}]}`.
+- [ ] After deploying, open `/login` directly in a new tab (not by clicking), then refresh it. Both should show the sign-in page.
 - [ ] Custom domain is attached, HTTPS works, and the domain is in Firebase's authorized domains (section 2).
 - [ ] The deployed site is the **release** build, not a debug build. The first load should not show a "debug" banner.
 

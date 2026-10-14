@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/curriculum.dart';
 import '../../theme/app_theme.dart';
-import '../auth/auth_screen.dart';
+import '../../router/navigation.dart';
 
 bool _isWide(BuildContext c) => MediaQuery.sizeOf(c).width >= 900;
 
@@ -186,8 +187,7 @@ class _Hero extends StatelessWidget {
               TextButton(onPressed: onBrowse, child: const Text('المناهج')),
             const SizedBox(width: 8),
             OutlinedButton(
-              onPressed: () => Navigator.of(context)
-                  .push(MaterialPageRoute(builder: (_) => const AuthScreen())),
+              onPressed: () => GoRouter.of(context).push(Routes.login),
               style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: AppColors.border),
                   shape: RoundedRectangleBorder(
@@ -746,7 +746,7 @@ class _Footer extends StatelessWidget {
         const _Logo(light: true),
         const SizedBox(height: 16),
         Wrap(alignment: WrapAlignment.center, children: [
-          link('انضمام كمعلم'),
+          link('انضمام كمعلم', () => GoRouter.of(context).push('${Routes.signup}?role=tutor')),
           link('تصفح المناهج', onBrowse),
           link('الدعم الفني عبر واتساب', () => _openWhatsapp('مرحباً، أحتاج إلى مساعدة')),
           link('الشروط والضمان'),

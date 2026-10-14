@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/progress_report.dart';
@@ -10,7 +11,7 @@ import '../../services/booking_service.dart';
 import '../../services/progress_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/dashboard_widgets.dart';
-import '../booking/trial_booking_screen.dart';
+import '../../router/navigation.dart';
 import 'student/next_class_card.dart';
 import 'student/student_sections.dart';
 
@@ -46,8 +47,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
     super.dispose();
   }
 
-  void _book() => Navigator.of(context)
-      .push(MaterialPageRoute(builder: (_) => const TrialBookingScreen()));
+  void _book() => GoRouter.of(context).push(Routes.book);
 
   String get _greeting => _now.hour < 12 ? 'صباح الخير' : 'مساء الخير';
 

@@ -18,6 +18,8 @@ class AuthService extends ChangeNotifier {
   AppUser? _currentUser;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _profileSub;
 
+  final Completer<void> _ready = Completer<void>();
+
   AuthService() {
     _auth.authStateChanges().listen(_onAuthChanged);
   }
@@ -26,11 +28,21 @@ class AuthService extends ChangeNotifier {
   UserRole get userRole => _currentUser?.role ?? UserRole.student;
   AppUser? get currentUser => _currentUser;
 
+  /// Completes once Firebase has restored (or ruled out) a saved session and,
+  /// for a signed-in user, loaded their profile. The router waits for this so
+  /// a page refresh doesn't look "signed out" for a moment.
+  Future<void> get ready => _ready.future;
+
+  void _markReady() {
+    if (!_ready.isCompleted) _ready.complete();
+  }
+
   void _onAuthChanged(User? firebaseUser) {
     _profileSub?.cancel();
     _profileSub = null;
     if (firebaseUser == null) {
       _currentUser = null;
+      _markReady();
       notifyListeners();
       return;
     }
@@ -41,10 +53,12 @@ class AuthService extends ChangeNotifier {
         .snapshots()
         .listen((doc) {
       // During sign-up the profile doesn't exist yet; signUp() sets it.
-      if (!doc.exists) return;
-      _currentUser = AppUser.fromMap(firebaseUser.uid, doc.data() ?? {});
-      notifyListeners();
-    });
+      if (doc.exists) {
+        _currentUser = AppUser.fromMap(firebaseUser.uid, doc.data() ?? {});
+        notifyListeners();
+      }
+      _markReady();
+    }, onError: (_) => _markReady());
   }
 
   Future<void> signIn(String email, String password) async {

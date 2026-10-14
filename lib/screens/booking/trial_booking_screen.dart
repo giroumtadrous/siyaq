@@ -4,10 +4,19 @@ import 'package:provider/provider.dart';
 
 import '../../data/curriculum.dart';
 import '../../models/session_model.dart';
+import '../../router/navigation.dart';
 import '../../services/auth_service.dart';
 import '../../services/booking_service.dart';
 import '../../theme/app_theme.dart';
 import 'booking_pickers.dart';
+
+/// Who a parent is booking for. Passed in memory with the route, so a
+/// student's id never appears in the browser address.
+class BookingTarget {
+  const BookingTarget({required this.studentId, required this.studentName});
+  final String studentId;
+  final String studentName;
+}
 
 /// Request a free trial class: pick a subject, a day and a start time. A tutor
 /// accepts the request afterwards.
@@ -78,6 +87,12 @@ class _TrialBookingScreenState extends State<TrialBookingScreen> {
       appBar: AppBar(
         backgroundColor: AppColors.surface,
         surfaceTintColor: Colors.transparent,
+        automaticallyImplyLeading: false,
+        leading: IconButton(
+          tooltip: 'رجوع',
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => goBackOrHome(context),
+        ),
         title: const Text('حجز حصة تجريبية',
             style: TextStyle(fontWeight: FontWeight.w800)),
       ),
@@ -247,7 +262,7 @@ class _Confirmation extends StatelessWidget {
           ),
           const SizedBox(height: 28),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => goBackOrHome(context),
             child: const Text('العودة إلى لوحتي'),
           ),
         ]),

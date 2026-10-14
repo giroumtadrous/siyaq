@@ -1,15 +1,20 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/user_model.dart';
+import '../../router/navigation.dart';
 import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
 
 /// Combined sign-in / sign-up screen. Sign-up lets the user pick a role.
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key, this.startOnSignUp = false});
+  const AuthScreen({super.key, this.startOnSignUp = false, this.initialRole});
   final bool startOnSignUp;
+
+  /// Role preselected on the sign-up form (from /signup?role=tutor).
+  final UserRole? initialRole;
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -22,7 +27,7 @@ class _AuthScreenState extends State<AuthScreen> {
   final _password = TextEditingController();
 
   late bool _signUp = widget.startOnSignUp;
-  UserRole _role = UserRole.student;
+  late UserRole _role = widget.initialRole ?? UserRole.student;
   bool _obscure = true;
   bool _loading = false;
   String? _error;
@@ -35,10 +40,22 @@ class _AuthScreenState extends State<AuthScreen> {
     super.dispose();
   }
 
-  void _setMode(bool signUp) => setState(() {
-        _signUp = signUp;
+  // Sign in and sign up are separate addresses (/login, /signup). Switching
+  // replaces the current history entry, and the router keeps this State, so
+  // the typed email survives; didUpdateWidget picks up the new mode.
+  void _setMode(bool signUp) =>
+      GoRouter.of(context).replace(signUp ? Routes.signup : Routes.login);
+
+  @override
+  void didUpdateWidget(AuthScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.startOnSignUp != widget.startOnSignUp) {
+      setState(() {
+        _signUp = widget.startOnSignUp;
         _error = null;
       });
+    }
+  }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
@@ -58,8 +75,8 @@ class _AuthScreenState extends State<AuthScreen> {
       } else {
         await auth.signIn(_email.text.trim(), _password.text);
       }
-      // AuthGate (the app home) swaps to the right dashboard once signed in.
-      if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+      // The router redirects to the home page (the right dashboard) as soon
+      // as the signed-in profile arrives.
     } on FirebaseAuthException catch (e) {
       if (mounted) setState(() => _error = _arabicError(e.code));
     } catch (_) {
@@ -109,7 +126,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   Align(
                     alignment: AlignmentDirectional.centerStart,
                     child: IconButton(
-                        onPressed: () => Navigator.of(context).maybePop(),
+                        onPressed: () => goBackOrHome(context),
                         icon: const Icon(Icons.arrow_forward_rounded)),
                   ),
                   const _MiniLogo(),
@@ -474,7 +491,7 @@ class _BrandPanel extends StatelessWidget {
                 radius: 200, backgroundColor: Colors.white.withValues(alpha: 0.07))),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           InkWell(
-            onTap: () => Navigator.of(context).maybePop(),
+            onTap: () => goBackOrHome(context),
             borderRadius: BorderRadius.circular(12),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Container(

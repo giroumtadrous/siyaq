@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart' show DateFormat;
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -11,6 +12,7 @@ import '../../services/booking_service.dart';
 import '../../services/progress_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/dashboard_widgets.dart';
+import '../../router/navigation.dart';
 import '../booking/trial_booking_screen.dart';
 
 class ParentDashboard extends StatefulWidget {
@@ -270,9 +272,12 @@ class _ChildViewState extends State<_ChildView> {
               DashPanel(
                 title: 'حصص ${widget.child.name}',
                 trailing: FilledButton.tonalIcon(
-                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => TrialBookingScreen(
-                          studentId: widget.child.uid, studentName: widget.child.name))),
+                  onPressed: () => GoRouter.of(context).push(
+                    Routes.book,
+                    // The child travels in memory, never in the address.
+                    extra: BookingTarget(
+                        studentId: widget.child.uid, studentName: widget.child.name),
+                  ),
                   icon: const Icon(Icons.add_rounded),
                   label: const Text('حجز حصة تجريبية'),
                 ),
