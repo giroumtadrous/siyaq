@@ -16,6 +16,7 @@ import 'services/progress_service.dart';
 import 'services/admin_service.dart';
 import 'screens/tutor/tutor_application_screen.dart';
 import 'services/tutor_application_service.dart';
+import 'services/tutor_directory_service.dart';
 import 'models/user_model.dart';
 
 import 'firebase_options.dart';
@@ -41,6 +42,7 @@ class SiyaqApp extends StatelessWidget {
         Provider(create: (_) => ProgressService()),
         Provider(create: (_) => AdminService()),
         Provider(create: (_) => TutorApplicationService()),
+        Provider(create: (_) => TutorDirectoryService()),
       ],
       child: MaterialApp(
         title: 'سياق | Siyaq',

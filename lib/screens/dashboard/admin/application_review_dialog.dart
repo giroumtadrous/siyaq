@@ -48,7 +48,7 @@ class _ApplicationReviewDialogState extends State<ApplicationReviewDialog> {
     try {
       await context
           .read<AdminService>()
-          .reviewApplication(widget.tutor.uid, approve: approve, note: note);
+          .reviewApplication(widget.tutor, _app, approve: approve, note: note);
       if (mounted) Navigator.pop(context, approve ? ApplicationStatus.approved : ApplicationStatus.rejected);
     } catch (_) {
       if (mounted) {

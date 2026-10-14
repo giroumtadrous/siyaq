@@ -26,6 +26,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       context.read<AdminService>().allApplications();
   late final Stream<List<TutoringSession>> _sessions =
       context.read<AdminService>().allSessions();
+  late final Stream<Map<String, bool>> _listings =
+      context.read<AdminService>().directoryListings();
 
   UserRole _roleTab = UserRole.tutor;
   String _query = '';
@@ -34,14 +36,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
   void _toast(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
-  Future<void> _setApproved(AppUser tutor, bool approved) async {
+  Future<void> _setApproved(AppUser tutor, bool approved, TutorApplication? app) async {
     if (!approved) {
       final yes = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
           title: Text('إيقاف حساب ${tutor.name}؟'),
-          content: const Text('لن يتمكن المعلم من الدخول إلى لوحته حتى تعيد اعتماده.'),
+          content: const Text('لن يتمكن المعلم من الدخول إلى لوحته، وسيختفي من دليل المعلمين حتى تعيد اعتماده.'),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context, false), child: const Text('رجوع')),
@@ -58,10 +60,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (yes != true || !mounted) return;
     }
     try {
-      await context.read<AdminService>().setTutorApproved(tutor.uid, approved);
+      await context.read<AdminService>().setTutorApproved(tutor, approved, application: app);
       if (mounted) _toast(approved ? 'تم اعتماد المعلم' : 'تم إيقاف المعلم');
     } catch (_) {
       if (mounted) _toast('تعذّر تنفيذ العملية، حاول مرة أخرى');
+    }
+  }
+
+  Future<void> _addToDirectory(AppUser tutor, TutorApplication app) async {
+    try {
+      await context.read<AdminService>().addToDirectory(tutor, app);
+      if (mounted) _toast('ظهر ${tutor.name} في دليل المعلمين');
+    } catch (_) {
+      if (mounted) _toast('تعذّر إضافة المعلم إلى الدليل، حاول مرة أخرى');
     }
   }
 
@@ -93,7 +104,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
             stream: _sessions,
             builder: (context, sessionSnap) => StreamBuilder<Map<String, TutorApplication>>(
             stream: _apps,
-            builder: (context, appSnap) {
+            builder: (context, appSnap) => StreamBuilder<Map<String, bool>>(
+            stream: _listings,
+            builder: (context, listSnap) {
               return SingleChildScrollView(
                 padding: EdgeInsets.symmetric(
                     horizontal: MediaQuery.sizeOf(context).width >= 900 ? 40 : 16,
@@ -120,13 +133,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               padding: EdgeInsets.all(48),
                               child: Center(child: CircularProgressIndicator()))
                         else
-                          ..._content(userSnap.data!, sessionSnap.data!, appSnap.data!),
+                          ..._content(userSnap.data!, sessionSnap.data!, appSnap.data!,
+                              listSnap.data ?? const {}),
                       ],
                     ),
                   ),
                 ),
               );
             },
+          ),
           ),
           ),
         ),
@@ -159,7 +174,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
         : TextButton(onPressed: () => _openReview(tutor, app), child: const Text('عرض الطلب'));
   }
 
-  Widget _tutorBadge(AppUser tutor, TutorApplication? app) {
+  Widget _tutorBadge(AppUser tutor, TutorApplication? app, [Map<String, bool>? listed]) {
+    if (tutor.approved && listed != null && listed[tutor.uid] != true) {
+      return const DashBadge('معتمد • غير ظاهر في الدليل', AppColors.amber);
+    }
     if (tutor.approved) return const DashBadge('معتمد', AppColors.mint);
     return switch (app?.status) {
       null => const DashBadge('لم يقدّم طلباً', AppColors.muted),
@@ -174,7 +192,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       : '${app.qualification} • خبرة ${app.experienceYears} سنوات • ${app.subjects.join('، ')}';
 
   List<Widget> _content(List<AppUser> users, List<TutoringSession> sessions,
-      Map<String, TutorApplication> apps) {
+      Map<String, TutorApplication> apps, Map<String, bool> listed) {
     final byId = {for (final u in users) u.uid: u};
     String nameOf(String id) {
       final u = byId[id];
@@ -339,18 +357,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
             for (final u in shownUsers)
               _UserTile(
                 user: u,
-                badge: u.role == UserRole.tutor ? _tutorBadge(u, apps[u.uid]) : null,
+                badge: u.role == UserRole.tutor ? _tutorBadge(u, apps[u.uid], listed) : null,
                 action: u.role != UserRole.tutor
                     ? null
                     : u.approved
-                        ? TextButton(
-                            onPressed: () => _setApproved(u, false),
-                            style: TextButton.styleFrom(
-                                foregroundColor: const Color(0xFFDC2626)),
-                            child: const Text('إيقاف'))
+                        ? Column(mainAxisSize: MainAxisSize.min, children: [
+                            // Approved before the directory existed.
+                            if (listed[u.uid] != true &&
+                                apps[u.uid]?.status == ApplicationStatus.approved)
+                              TextButton(
+                                  onPressed: () => _addToDirectory(u, apps[u.uid]!),
+                                  child: const Text('إظهار في الدليل')),
+                            TextButton(
+                                onPressed: () => _setApproved(u, false, apps[u.uid]),
+                                style: TextButton.styleFrom(
+                                    foregroundColor: const Color(0xFFDC2626)),
+                                child: const Text('إيقاف')),
+                          ])
                         : apps[u.uid]?.status == ApplicationStatus.approved
                             ? FilledButton(
-                                onPressed: () => _setApproved(u, true),
+                                onPressed: () => _setApproved(u, true, apps[u.uid]),
                                 child: const Text('إعادة التفعيل'))
                             : _reviewButton(u, apps[u.uid]),
               ),
