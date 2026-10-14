@@ -104,8 +104,11 @@ class _TutorDashboardState extends State<TutorDashboard> {
       );
       if (yes != true || !mounted) return;
     }
+    final bookings = context.read<BookingService>();
     await _run(
-      () => context.read<BookingService>().updateSession(s.id, status: status),
+      () => status == SessionStatus.confirmed
+          ? bookings.updateSession(s.id, status: status)
+          : bookings.finishSession(s, status),
       ok: ok,
     );
   }
