@@ -6,12 +6,16 @@ import 'package:provider/provider.dart';
 
 import '../../models/progress_report.dart';
 import '../../models/session_model.dart';
+import '../../models/tutor_profile.dart';
 import '../../services/auth_service.dart';
 import '../../services/booking_service.dart';
 import '../../services/progress_service.dart';
+import '../../services/tutor_directory_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/dashboard_widgets.dart';
-import '../../router/navigation.dart';
+import '../booking/trial_booking_screen.dart';
+import '../directory/tutor_directory_screen.dart';
+import '../directory/tutor_widgets.dart';
 import 'student/next_class_card.dart';
 import 'student/student_sections.dart';
 
@@ -28,6 +32,10 @@ class _StudentDashboardState extends State<StudentDashboard> {
       context.read<BookingService>().sessionsForUser(_uid);
   late final Stream<List<ProgressReport>> _reports =
       context.read<ProgressService>().reportsForStudent(_uid);
+  late final Stream<List<TutorProfile>> _tutors =
+      context.read<TutorDirectoryService>().activeTutors();
+  late final Stream<Map<String, int>> _ratings =
+      context.read<TutorDirectoryService>().myRatings(_uid);
 
   // Re-evaluates countdowns and the join window.
   Timer? _tick;
@@ -47,7 +55,25 @@ class _StudentDashboardState extends State<StudentDashboard> {
     super.dispose();
   }
 
-  void _book() => GoRouter.of(context).push(Routes.book);
+  void _book() => Navigator.of(context)
+      .push(MaterialPageRoute(builder: (_) => const TrialBookingScreen()));
+
+  void _browseTutors() => Navigator.of(context)
+      .push(MaterialPageRoute(builder: (_) => const TutorDirectoryScreen()));
+
+  Future<void> _rate(TutoringSession s) async {
+    final rating = await showDialog<int>(
+        context: context, builder: (_) => RateSessionDialog(subject: s.subject));
+    if (rating == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<TutorDirectoryService>().rateSession(s, rating);
+      messenger.showSnackBar(const SnackBar(content: Text('شكراً! تم حفظ تقييمك')));
+    } catch (_) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('تعذّر حفظ التقييم، حاول مرة أخرى')));
+    }
+  }
 
   String get _greeting => _now.hour < 12 ? 'صباح الخير' : 'مساء الخير';
 
@@ -124,13 +150,27 @@ class _StudentDashboardState extends State<StudentDashboard> {
       return d.year == _now.year && d.month == _now.month && d.day == _now.day;
     });
 
-    final schedule = ScheduleSection(
-      upcoming: upcoming,
-      past: past,
-      showUpcoming: _showUpcoming,
-      onTab: (v) => setState(() => _showUpcoming = v),
-      onBook: _book,
-      now: _now,
+    // Ratings and the directory load on their own, so a failure there never
+    // hides the schedule.
+    final schedule = StreamBuilder<Map<String, int>>(
+      stream: _ratings,
+      builder: (context, ratingSnap) => ScheduleSection(
+        upcoming: upcoming,
+        past: past,
+        showUpcoming: _showUpcoming,
+        onTab: (v) => setState(() => _showUpcoming = v),
+        onBook: _book,
+        now: _now,
+        ratings: ratingSnap.data ?? const {},
+        onRate: ratingSnap.hasData ? _rate : null,
+      ),
+    );
+    final tutors = StreamBuilder<List<TutorProfile>>(
+      stream: _tutors,
+      builder: (context, tutorSnap) => TopTutorsSection(
+        tutors: tutorSnap.hasError ? const [] : tutorSnap.data,
+        onBrowse: _browseTutors,
+      ),
     );
     final progress = ProgressSection(reports: reports, completed: completed);
     final code = LinkCodeSection(code: _uid);
@@ -162,9 +202,9 @@ class _StudentDashboardState extends State<StudentDashboard> {
           const SizedBox(width: 20),
           Expanded(
               flex: 2,
-              child: Column(children: [progress, gap, code])),
+              child: Column(children: [tutors, gap, progress, gap, code])),
         ])
-      else ...[schedule, gap, progress, gap, code],
+      else ...[schedule, gap, tutors, gap, progress, gap, code],
     ];
   }
 }

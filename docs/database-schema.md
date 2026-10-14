@@ -1,6 +1,6 @@
 # Siyaq database schema
 
-Cloud Firestore project `siyaq-dc1a6`. Four collections. Authentication is Firebase Auth (email and password); the Auth `uid` is the document id of the user's profile.
+Cloud Firestore project `siyaq-dc1a6`. Six collections. Authentication is Firebase Auth (email and password); the Auth `uid` is the document id of the user's profile.
 
 This document describes what the app writes and what `firestore.rules` enforces. If the two ever disagree, the rules win. Rules are tested in `firestore-tests/`.
 
@@ -23,6 +23,8 @@ progress_reports/{autoId}                 │
    tutorId   ─────────────────────────────┘
 
 tutor_applications/{tutorUid}   (same id as the tutor's users doc)
+tutor_profiles/{tutorUid}       (public directory listing, same id)
+reviews/{sessionId}             (one rating per completed session)
 ```
 
 All references are plain string ids. Firestore does not enforce them, so the rules and app code check what matters.
@@ -224,6 +226,66 @@ The subject names are listed inside `firestore.rules` as well as in `lib/data/cu
 
 ---
 
+## `tutor_profiles/{tutorUid}`
+
+The public tutor directory that students browse by stage, grade and subject. The document id is the tutor's uid. An admin creates it from the approved application. After that, the counters only change in the same batch as the event that justifies them.
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | Copied from `users/{uid}.name` when listed. |
+| `subjects`, `stages`, `qualification`, `experienceYears`, `bio` | as in the application | Copied from the approved application. The rules check that they match exactly. |
+| `active` | bool | `false` while the tutor is suspended. Only active tutors are listed. |
+| `ratingSum`, `ratingCount` | int | Totals of the 1–5 ratings in `reviews`. Both start at `0`. |
+| `completedSessions`, `cancelledSessions` | int | Sessions this tutor finished or cancelled. A new listing carries over sessions finished before it existed. |
+| `lastSessionId` | string | The session behind the latest session-counter change (`""` at first). The rules use it to check that change. |
+| `lastReviewId` | string | The same, for the latest rating (`""` at first). |
+
+### How a tutor is ranked
+
+`lib/services/tutor_ranking.dart` computes the ranking in the app. It is a weighted sum of four signals, each scaled to 0–1:
+
+| Weight | Signal |
+|---|---|
+| 50% | Bayesian average rating: the tutor's ratings plus 5 imaginary 4★ ratings. One 5★ review can't outrank forty 4.8★ ones, and a new tutor starts mid-table. |
+| 20% | Completed sessions, log-scaled, full credit at 100. |
+| 15% | Reliability: completed ÷ (completed + cancelled), smoothed by 5 completed. |
+| 15% | Teaching experience in years, full credit at 15. |
+
+Ties go to the tutor with more ratings, then more sessions, then by name.
+
+### Who can do what
+
+| Action | Allowed for |
+|---|---|
+| Create | An admin, only for an approved tutor whose application is `approved` (both may change in the same batch), with content copied exactly, `active: true`, zero ratings, and empty `last*Id`. |
+| Read one | Any signed-in user. |
+| List | Any signed-in user, but the query must filter `active == true`. An admin can list all. |
+| Update | An admin may change only `active`. The tutor may add 1 to `completedSessions` or `cancelledSessions`, but only in the batch that moves `lastSessionId`'s session from `pending`/`confirmed` to that status. A student may add their rating to `ratingSum` and 1 to `ratingCount`, but only in the batch that creates `reviews/{lastReviewId}` for this tutor. |
+| Delete | Nobody. |
+
+The other side is enforced too. Once a tutor is listed, a tutor can't complete or cancel a session, and a student can't create a review, without the matching counter update in the same batch.
+
+---
+
+## `reviews/{sessionId}`
+
+A student's rating of one completed session. The id is the session id, so each session is rated at most once. Write-once.
+
+| Field | Type | Notes |
+|---|---|---|
+| `studentId` | string | Must be the author, and the session's student. |
+| `tutorId` | string | Must be the session's tutor. |
+| `rating` | int | 1–5. |
+| `createdAt` | string | ISO-8601 local string. |
+
+| Action | Allowed for |
+|---|---|
+| Create | The session's student, only when the session is `completed`, together with the profile rating bump (if the tutor is listed). |
+| Read | The student who wrote it. The tutor it rates. An admin. Reviews are never public, because `studentId` is also the parent link code. |
+| Update, delete | Nobody. |
+
+---
+
 ## Queries and indexes
 
 Every query the app runs, and the index it needs.
@@ -237,6 +299,9 @@ Every query the app runs, and the index it needs.
 | Admin | `users` (all), `sessions` (all), `tutor_applications` (all) | None |
 | Tutor (before approval) | `tutor_applications/{uid}` single read and live listener | None |
 | Any signed-in user | `users/{uid}` single reads and live listeners | None |
+| Student | `tutor_profiles` where `active == true` (ranked and grouped in the app) | None |
+| Student | `reviews` where `studentId == uid` | None |
+| Admin | `tutor_profiles` (all) | None |
 
 The two composite indexes are in `firestore.indexes.json`. Deploy them with the rules:
 
@@ -264,7 +329,11 @@ Nothing is ever deleted through the app, so there are no dangling-reference clea
 ## Known limitations
 
 - **Dates are strings with no timezone.** Fine while everyone is in one zone. Moving to Firestore `Timestamp` would fix zones and let the rules reject past dates; it needs a migration.
-- **Tutor names are not visible to students or parents.** Profiles are only readable by their owner, admins, and (for students) approved tutors and parents. Showing a tutor's name would need a `tutorName` field copied onto the session when it is accepted.
+- **Tutor names are not shown on sessions yet.** `users` profiles stay private, but the name of a listed tutor can now be read from `tutor_profiles/{tutorId}`.
+- **The directory matches tutors by stage, not grade.** Applications record stages, so a tutor who teaches `prep` appears under every prep grade that offers their subject.
+- **A directory listing is a snapshot.** It doesn't follow later renames of the tutor's `users` name, because an approved application can't be edited.
+- **Students can't book a specific tutor yet.** Bookings are still `TBD` until a tutor accepts or an admin assigns one.
+- **Parents can't rate.** Only the student account can rate a session.
 - **No tutor availability data.** Booking slots are fixed hours; a tutor confirms or ignores them. The application records a free-text availability note, but nothing uses it.
 - **Applications have no documents.** A tutor describes their qualification in text. Certificates and ID cannot be uploaded, so an admin approves on the tutor's word unless they verify outside the app. Uploads need Firebase Storage, which has no rules yet.
 - **Application rejections are not notified.** The tutor sees the reason the next time they open the app. Nothing emails them.

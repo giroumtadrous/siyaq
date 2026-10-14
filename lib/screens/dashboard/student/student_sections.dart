@@ -4,7 +4,10 @@ import 'package:intl/intl.dart' show DateFormat;
 
 import '../../../models/progress_report.dart';
 import '../../../models/session_model.dart';
+import '../../../models/tutor_profile.dart';
+import '../../../services/tutor_ranking.dart';
 import '../../../theme/app_theme.dart';
+import '../../directory/tutor_widgets.dart';
 import '../../../widgets/dashboard_widgets.dart';
 import 'next_class_card.dart';
 
@@ -35,12 +38,20 @@ class ScheduleSection extends StatelessWidget {
     required this.onTab,
     required this.onBook,
     required this.now,
+    this.ratings = const {},
+    this.onRate,
   });
   final List<TutoringSession> upcoming, past;
   final bool showUpcoming;
   final ValueChanged<bool> onTab;
   final VoidCallback onBook;
   final DateTime now;
+
+  /// The student's ratings by session id.
+  final Map<String, int> ratings;
+
+  /// Rates a completed session; no rating button when null.
+  final ValueChanged<TutoringSession>? onRate;
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +75,14 @@ class ScheduleSection extends StatelessWidget {
       } else {
         rows.add(const Divider(height: 1, color: AppColors.border));
       }
-      rows.add(_SessionRow(session: s));
+      final rateable = onRate != null &&
+          s.status == SessionStatus.completed &&
+          s.tutorId != unassignedTutorId;
+      rows.add(_SessionRow(
+        session: s,
+        rating: ratings[s.id],
+        onRate: rateable && !ratings.containsKey(s.id) ? () => onRate!(s) : null,
+      ));
     }
 
     return DashPanel(
@@ -118,8 +136,10 @@ class _EmptySchedule extends StatelessWidget {
 }
 
 class _SessionRow extends StatelessWidget {
-  const _SessionRow({required this.session});
+  const _SessionRow({required this.session, this.rating, this.onRate});
   final TutoringSession session;
+  final int? rating;
+  final VoidCallback? onRate;
 
   (IconData, String, Color) get _status => switch (session.status) {
         SessionStatus.pending => (Icons.hourglass_top_rounded, 'بانتظار التأكيد', AppColors.amber),
@@ -155,6 +175,25 @@ class _SessionRow extends StatelessWidget {
               if (session.isTrial)
                 const Text('حصة تجريبية',
                     style: TextStyle(color: AppColors.muted, fontSize: 12)),
+              if (rating != null)
+                Semantics(
+                  label: 'قيّمتها ${arabicNumber(rating!)} من ٥',
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: RatingStars(rating!.toDouble(), size: 14),
+                  ),
+                )
+              else if (onRate != null)
+                TextButton.icon(
+                  onPressed: onRate,
+                  icon: const Icon(Icons.star_outline_rounded, size: 18),
+                  label: const Text('قيّم الحصة'),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                    foregroundColor: readableOn(AppColors.amber),
+                  ),
+                ),
             ]),
           ),
           const SizedBox(width: 8),
@@ -249,6 +288,48 @@ class _ScoreBar extends StatelessWidget {
   }
 }
 
+// ───────────────────────── Tutors ─────────────────────────
+
+/// The three best-ranked tutors, and the way into the full directory.
+class TopTutorsSection extends StatelessWidget {
+  const TopTutorsSection({super.key, required this.tutors, required this.onBrowse});
+
+  /// Null while loading.
+  final List<TutorProfile>? tutors;
+  final VoidCallback onBrowse;
+
+  @override
+  Widget build(BuildContext context) {
+    final top = rankTutors(tutors ?? const []).take(3).toList();
+    return DashPanel(
+      title: 'أفضل المعلمين',
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (tutors == null)
+          const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()))
+        else if (top.isEmpty)
+          const Text('سيظهر المعلمون المعتمدون هنا قريباً.',
+              style: TextStyle(color: AppColors.muted, height: 1.6))
+        else
+          for (var i = 0; i < top.length; i++)
+            TutorCard(
+                tutor: top[i], rank: i + 1, onTap: () => showTutorDetails(context, top[i])),
+        const SizedBox(height: 6),
+        OutlinedButton.icon(
+          onPressed: onBrowse,
+          icon: const Icon(Icons.person_search_rounded),
+          label: const Text('ابحث عن معلم حسب الصف والمادة'),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
 // ───────────────────────── Parent link code ─────────────────────────
 
 class LinkCodeSection extends StatelessWidget {
@@ -256,11 +337,11 @@ class LinkCodeSection extends StatelessWidget {
   final String code;
 
   @override
-  Widget build(BuildContext context) => Container(
-        decoration: BoxDecoration(
-            color: Colors.white,
+  Widget build(BuildContext context) => Material(
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: AppColors.border)),
+            side: const BorderSide(color: AppColors.border)),
         clipBehavior: Clip.antiAlias,
         child: Theme(
           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),

@@ -13,6 +13,7 @@ import 'services/auth_service.dart';
 import 'services/booking_service.dart';
 import 'services/progress_service.dart';
 import 'services/tutor_application_service.dart';
+import 'services/tutor_directory_service.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
@@ -56,6 +57,7 @@ class _SiyaqAppState extends State<SiyaqApp> {
         Provider(create: (_) => ProgressService()),
         Provider(create: (_) => AdminService()),
         Provider(create: (_) => TutorApplicationService()),
+        Provider(create: (_) => TutorDirectoryService()),
       ],
       child: MaterialApp.router(
         title: 'سياق | Siyaq',

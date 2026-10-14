@@ -154,7 +154,18 @@ service cloud.firestore {
               || (resource.data.status == 'confirmed' && d.status in ['completed', 'cancelled']))
           && (!changed.hasAny(['googleMeetLink'])
               || (resource.data.status in ['pending', 'confirmed']
-                  && linkOk(d.get('googleMeetLink', null))));
+                  && linkOk(d.get('googleMeetLink', null))))
+          && (!(d.status in ['completed', 'cancelled'] && changed.hasAny(['status']))
+              || countedOnProfile());
+      }
+
+      // Finishing a session must bump the tutor's directory counters in the
+      // same batch (see tutor_profiles), unless they aren't listed yet.
+      function countedOnProfile() {
+        let p = /databases/$(database)/documents/tutor_profiles/$(request.auth.uid);
+        return !existsAfter(p)
+          || (getAfter(p).data.lastSessionId == sessionId
+              && get(p).data.lastSessionId != sessionId);
       }
 
       // An admin assigns an approved tutor to an unclaimed booking.
@@ -246,6 +257,139 @@ service cloud.firestore {
         || adminDecides();
 
       allow delete: if false;
+    }
+
+    // ───────────── tutor_profiles ─────────────
+    // The public tutor directory students search. One per listed tutor, keyed
+    // by their uid. An admin creates it from the approved application; the
+    // counters are then only moved by the batch that causes them:
+    //   completedSessions / cancelledSessions: the tutor finishing a session.
+    //   ratingSum / ratingCount: a student creating a review.
+    // last*Id names the document that justifies the latest bump, so the rules
+    // can check it.
+
+    match /tutor_profiles/{tutorId} {
+      function userPath() {
+        return /databases/$(database)/documents/users/$(tutorId);
+      }
+      function appPath() {
+        return /databases/$(database)/documents/tutor_applications/$(tutorId);
+      }
+
+      function counter(n) {
+        return n is int && n >= 0;
+      }
+
+      // Copied from the approved application and the tutor's profile, so the
+      // directory can't say anything the admin didn't approve.
+      function adminCreates(d) {
+        let app = getAfter(appPath()).data;
+        let user = getAfter(userPath()).data;
+        return isAdmin()
+          && d.keys().hasOnly(['name', 'subjects', 'stages', 'qualification', 'experienceYears',
+                               'bio', 'active', 'ratingSum', 'ratingCount', 'completedSessions',
+                               'cancelledSessions', 'lastSessionId', 'lastReviewId'])
+          && d.keys().hasAll(['name', 'subjects', 'stages', 'qualification', 'experienceYears',
+                              'bio', 'active', 'ratingSum', 'ratingCount', 'completedSessions',
+                              'cancelledSessions', 'lastSessionId', 'lastReviewId'])
+          && user.role == 'tutor' && user.approved == true
+          && app.status == 'approved'
+          && d.name == user.name
+          && d.subjects == app.subjects
+          && d.stages == app.stages
+          && d.qualification == app.qualification
+          && d.experienceYears == app.experienceYears
+          && d.bio == app.bio
+          && d.active == true
+          && d.ratingSum == 0 && d.ratingCount == 0
+          // Sessions finished before the tutor was listed are counted once here.
+          && counter(d.completedSessions) && counter(d.cancelledSessions)
+          && d.lastSessionId == '' && d.lastReviewId == '';
+      }
+
+      // Suspending / re-activating a tutor hides or shows them.
+      function adminToggles() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return isAdmin() && changed.hasOnly(['active']) && request.resource.data.active is bool;
+      }
+
+      // The tutor finished one of their sessions in this same batch.
+      function tutorCounts() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        let d = request.resource.data;
+        let was = resource.data;
+        let sid = d.lastSessionId;
+        let path = /databases/$(database)/documents/sessions/$(sid);
+        let status = getAfter(path).data.status;
+        return request.auth.uid == tutorId
+          && isApprovedTutor()
+          && changed.hasOnly(['completedSessions', 'cancelledSessions', 'lastSessionId'])
+          && sid is string && sid.size() > 0 && sid != was.lastSessionId
+          && get(path).data.tutorId == tutorId
+          && get(path).data.status in ['pending', 'confirmed']
+          && ((status == 'completed'
+                && d.completedSessions == was.completedSessions + 1
+                && d.cancelledSessions == was.cancelledSessions)
+              || (status == 'cancelled'
+                && d.cancelledSessions == was.cancelledSessions + 1
+                && d.completedSessions == was.completedSessions));
+      }
+
+      // A student created a review of this tutor in this same batch.
+      function reviewCounts() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        let d = request.resource.data;
+        let rid = d.lastReviewId;
+        let path = /databases/$(database)/documents/reviews/$(rid);
+        let review = getAfter(path).data;
+        return role() == 'student'
+          && changed.hasOnly(['ratingSum', 'ratingCount', 'lastReviewId'])
+          && rid is string && rid.size() > 0
+          && !exists(path)
+          && review.tutorId == tutorId
+          && review.studentId == request.auth.uid
+          && d.ratingCount == resource.data.ratingCount + 1
+          && d.ratingSum == resource.data.ratingSum + review.rating;
+      }
+
+      // Listing is limited to active tutors (queries must filter on it). A
+      // single get is open so a review can still be counted for a tutor who
+      // was suspended after the session.
+      allow get: if signedIn();
+      allow list: if isAdmin() || (signedIn() && resource.data.active == true);
+
+      allow create: if adminCreates(request.resource.data);
+      allow update: if adminToggles() || tutorCounts() || reviewCounts();
+      allow delete: if false;
+    }
+
+    // ───────────── reviews ─────────────
+    // A student's 1–5 rating of a completed session, keyed by the session id
+    // so each session is rated at most once. Write-once.
+
+    match /reviews/{sessionId} {
+      function validNewReview(d) {
+        let session = get(/databases/$(database)/documents/sessions/$(sessionId)).data;
+        let p = /databases/$(database)/documents/tutor_profiles/$(d.tutorId);
+        return role() == 'student'
+          && d.keys().hasOnly(['studentId', 'tutorId', 'rating', 'createdAt'])
+          && d.keys().hasAll(['studentId', 'tutorId', 'rating', 'createdAt'])
+          && d.studentId == request.auth.uid
+          && d.rating is int && d.rating >= 1 && d.rating <= 5
+          && d.createdAt is string && d.createdAt.size() <= 40
+          && session.studentId == d.studentId
+          && session.tutorId == d.tutorId
+          && session.status == 'completed'
+          // Counted on the tutor's directory profile in the same batch.
+          && (!existsAfter(p) || getAfter(p).data.lastReviewId == sessionId);
+      }
+
+      allow get, list: if isAdmin()
+        || (signedIn() && resource.data.studentId == request.auth.uid)
+        || (isApprovedTutor() && resource.data.tutorId == request.auth.uid);
+
+      allow create: if signedIn() && validNewReview(request.resource.data);
+      allow update, delete: if false;
     }
 
     // ───────────── progress_reports ─────────────

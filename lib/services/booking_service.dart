@@ -83,6 +83,25 @@ class BookingService extends ChangeNotifier {
     });
   }
 
+  /// Marks the tutor's session completed or cancelled, and counts it on their
+  /// directory profile in the same batch (the rules require both once the
+  /// tutor is listed).
+  Future<void> finishSession(TutoringSession session, SessionStatus status) async {
+    assert(status == SessionStatus.completed || status == SessionStatus.cancelled);
+    final profile = _db.collection('tutor_profiles').doc(session.tutorId);
+    final listed = (await profile.get()).exists;
+    final batch = _db.batch();
+    batch.update(_db.collection('sessions').doc(session.id), {'status': status.name});
+    if (listed) {
+      batch.update(profile, {
+        status == SessionStatus.completed ? 'completedSessions' : 'cancelledSessions':
+            FieldValue.increment(1),
+        'lastSessionId': session.id,
+      });
+    }
+    await batch.commit();
+  }
+
   Stream<List<TutoringSession>> sessionsForUser(String uid, {bool asTutor = false}) {
     final field = asTutor ? 'tutorId' : 'studentId';
     return _db
