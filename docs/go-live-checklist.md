@@ -14,7 +14,8 @@ Done since the first draft: `.firebaserc` links the folder to `siyaq-dc1a6`; `fi
 
 **Blocking launch — code and repo**
 - [ ] **Commit the router work.** `lib/router/`, `test/navigation_test.dart` and edits to 9 files are uncommitted. Run `flutter analyze` and `flutter test` first (section 6).
-- [ ] **Fix the GitHub deploy workflows.** Both files in `.github/workflows/` run `npm ci && npm run build`, but there is no `package.json`, so every push to `master` and every PR fails. Replace that step with a Flutter setup (`subosito/flutter-action`) plus `flutter pub get` and `flutter build web --release`, or delete the workflows and deploy by hand. Also check the `FIREBASE_SERVICE_ACCOUNT_SIYAQ_DC1A6` secret exists in the repo settings.
+- [x] **Fix the GitHub deploy workflows.** Both workflows now set up Flutter, run `flutter test` and `flutter build web --release`, then deploy `build/web` (a preview channel for PRs, `live` on push to `master`). They only deploy Hosting: Firestore rules and indexes still go out by hand (section 3).
+- [ ] **Check the `FIREBASE_SERVICE_ACCOUNT_SIYAQ_DC1A6` secret** exists in the repo settings (Settings → Secrets and variables → Actions). Without it the deploy step fails.
 - [ ] **Delete the stray `public/` and `y/` folders.** Both hold the Firebase "Welcome to Firebase Hosting" placeholder page and are no longer used.
 - [ ] **WhatsApp number** is still the placeholder `201000000000` (`lib/data/curriculum.dart:4`).
 - [ ] **Terms and privacy links** in the landing footer (`landing_screen.dart:752-753`) still go nowhere. They need real pages (section 9).
