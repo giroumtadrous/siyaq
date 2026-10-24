@@ -37,29 +37,4 @@ A Flutter web app (Arabic, right-to-left) on Firebase: about 7,100 lines of app 
 
 To quote in EGP, multiply by the current USD→EGP rate.
 
-**Reasonable figure for this project:** about **$3,500–6,000**. That is the junior-to-mid range for ~300 hours. The upper end applies if the client values the security rules and automated tests, which many small apps skip.
-
-## Why it isn't worth the full range yet
-
-The app is not launched. The go-live checklist (`docs/go-live-checklist.md`) still lists:
-
-- Firestore rules, the first admin account and the live deploy.
-- Privacy policy and terms pages.
-- A placeholder WhatsApp number and unverified marketing claims.
-- No payments and no email or push notifications.
-- Students can't book a specific tutor yet.
-
-If you are billing a client, a common approach is to charge for the work done now and quote the launch items separately.
-
-## Running costs so far
-
-These are separate from the development price.
-
-| Item | Cost |
-|---|---|
-| Firebase (Hosting, Firestore, Auth) on the free Spark plan | $0 at current, pre-launch usage |
-| Domain name (if bought) | ~$10–15 / year |
-| Google Play account (only if you ship the Android app) | $25 once |
-| Apple developer account (only if you ship the iOS app) | $99 / year |
-
-The real Firebase bill is visible only in the Firebase console, under Usage and billing.
+**Price for the work so far: about $3,500–6,000.** That is the junior-to-mid range for ~300 hours.
